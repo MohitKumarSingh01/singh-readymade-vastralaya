@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS "Product" (
+  "id" SERIAL NOT NULL,
+  "name" TEXT NOT NULL,
+  "slug" TEXT NOT NULL,
+  "brand" TEXT NOT NULL,
+  "category" TEXT NOT NULL,
+  "gender" TEXT NOT NULL,
+  "price" DOUBLE PRECISION NOT NULL,
+  "mrp" DOUBLE PRECISION NOT NULL,
+  "description" TEXT NOT NULL,
+  "image" TEXT NOT NULL,
+  "colors" TEXT NOT NULL,
+  "sizes" TEXT NOT NULL,
+  "stock" INTEGER NOT NULL DEFAULT 0,
+  "rating" DOUBLE PRECISION NOT NULL DEFAULT 4.5,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL,
+
+  CONSTRAINT "Product_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "Product_slug_key" UNIQUE ("slug")
+);
