@@ -8,9 +8,9 @@ datasource db {
 }
 
 model Product {
-  id          Int      @id @default(autoincrement())
+  id          Int         @id @default(autoincrement())
   name        String
-  slug        String   @unique
+  slug        String      @unique
   brand       String
   category    String
   gender      String
@@ -20,8 +20,41 @@ model Product {
   image       String
   colors      String
   sizes       String
-  stock       Int      @default(0)
-  rating      Float    @default(4.5)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  stock       Int         @default(0)
+  rating      Float       @default(4.5)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  orderItems  OrderItem[]
+}
+
+model Order {
+  id                Int         @id @default(autoincrement())
+  orderNumber       String      @unique
+  customerName      String
+  customerEmail     String
+  customerPhone     String
+  address           String
+  city              String
+  state             String
+  pincode           String
+  subtotal          Float
+  deliveryCharge    Float
+  total             Float
+  razorpayOrderId   String?     @unique
+  razorpayPaymentId String?     @unique
+  paymentStatus     String      @default("PENDING")
+  orderStatus       String      @default("PENDING")
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  items             OrderItem[]
+}
+
+model OrderItem {
+  id        Int     @id @default(autoincrement())
+  quantity  Int
+  price     Float
+  productId Int
+  orderId   Int
+  product   Product @relation(fields: [productId], references: [id])
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }
