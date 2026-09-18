@@ -13,6 +13,7 @@ const products = [
   ["Puffer Winter Jacket","NorthPeak","Winter Wear","Men",1799,2999,"Warm quilted jacket designed for winter layering.","#111111,#1d3557,#7f1d1d","M,L,XL,XXL",18],
   ["Cable Knit Sweater","CozyWear","Sweaters","Men",999,1599,"Classic knit sweater with a soft winter feel.","#9a3412,#334155,#f1e7d0","M,L,XL,XXL",23],
   ["Comfort Cotton Boxer","ComfortFit","Innerwear","Men",399,599,"Soft cotton boxer with comfortable waistband.","#111111,#e5e7eb,#64748b","M,L,XL,XXL",74],
+
   ["Classic Silk Saree","Rangoli","Sarees","Women",1499,2499,"Elegant festive saree with a rich drape.","#8b1e3f,#166534,#7c2d12","Free Size",26],
   ["Printed Daily Saree","Rangoli","Sarees","Women",899,1399,"Lightweight printed saree for everyday wear.","#db2777,#2563eb,#15803d","Free Size",34],
   ["Embroidered Kurti","EthnicAura","Kurtis","Women",899,1399,"Elegant embroidered kurti for casual and festive styling.","#ec4899,#4338ca,#166534","S,M,L,XL,XXL",41],
@@ -23,6 +24,7 @@ const products = [
   ["Women's Leggings","SoftLine","Leggings","Women",449,699,"Stretch leggings for everyday comfort.","#111111,#374151,#7c3aed","S,M,L,XL,XXL",58],
   ["Cotton Brief Set","SoftLine","Innerwear","Women",699,999,"Comfort-focused cotton innerwear set.","#111111,#f5d0fe,#fce7f3","S,M,L,XL",36],
   ["Lounge Shorts","DailyWear","Shorts","Women",499,749,"Relaxed lounge shorts with soft elastic waist.","#111111,#f1f5f9,#be123c","S,M,L,XL,XXL",44],
+
   ["Kids Graphic T-Shirt","LittleLoop","T-Shirts","Kids",349,549,"Fun graphic tee made for active kids.","#2563eb,#f97316,#22c55e","4Y,6Y,8Y,10Y,12Y",33],
   ["Kids Denim Jeans","LittleLoop","Jeans","Kids",699,999,"Durable denim with comfortable stretch.","#315b83,#111111","4Y,6Y,8Y,10Y,12Y",21],
   ["Unisex Hoodie","StreetFlex","Winter Wear","Unisex",999,1499,"Heavyweight hoodie with relaxed unisex fit.","#111111,#475569,#d1d5db","S,M,L,XL,XXL",37],
@@ -30,18 +32,56 @@ const products = [
 ];
 
 async function main() {
-  await prisma.product.deleteMany();
+  const existing = await prisma.product.count();
+
+  if (existing > 0) {
+    console.log(
+      `Database already has ${existing} products. Skipping seed.`
+    );
+    return;
+  }
+
   for (const p of products) {
-    const [name,brand,category,gender,price,mrp,description,colors,sizes,stock] = p as any[];
+    const [
+      name,
+      brand,
+      category,
+      gender,
+      price,
+      mrp,
+      description,
+      colors,
+      sizes,
+      stock
+    ] = p as any[];
+
     await prisma.product.create({
       data: {
-        name, brand, category, gender, price, mrp, description,
+        name,
+        brand,
+        category,
+        gender,
+        price,
+        mrp,
+        description,
         image: `https://placehold.co/800x1000/png?text=${encodeURIComponent(name)}`,
-        colors, sizes, stock,
-        slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")
+        colors,
+        sizes,
+        stock,
+        slug: name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/(^-|-$)/g, "")
       }
     });
   }
+
   console.log(`Seeded ${products.length} demo products.`);
 }
-main().finally(() => prisma.$disconnect());
+
+main()
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  })
+  .finally(() => prisma.$disconnect());
