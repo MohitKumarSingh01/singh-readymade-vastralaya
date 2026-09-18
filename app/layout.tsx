@@ -1,16 +1,24 @@
 import "./globals.css";
 import type { Metadata } from "next";
-import { CursorGlow } from "@/components/CursorGlow";
+import CursorGlow from "@/components/CursorGlow";
 
 export const metadata: Metadata = {
   title: "Singh Readymade Vastralaya",
-  description: "Men's, women's and kids' fashion — everyday wear, ethnic wear and winter collections."
+  description:
+    "Fashion for men, women and kids — from daily essentials to festive wear and winter clothing.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
     <html lang="en">
-      <body><CursorGlow />{children}</body>
+      <body>
+        <CursorGlow />
+        {children}
+      </body>
     </html>
   );
 }
