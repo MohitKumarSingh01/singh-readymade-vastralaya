@@ -16,27 +16,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Read the raw request body for Razorpay signature verification
+    /*
+     * IMPORTANT:
+     * Razorpay webhook signature must be calculated
+     * using the raw request body.
+     */
     const rawBody = await req.text();
 
     const signature = req.headers.get("x-razorpay-signature");
 
     if (!signature) {
-      console.error("Razorpay webhook signature missing.");
-
       return NextResponse.json(
         { error: "Missing webhook signature." },
         { status: 400 }
       );
     }
 
-    // Generate expected Razorpay webhook signature
     const expectedSignature = crypto
       .createHmac("sha256", webhookSecret)
       .update(rawBody)
       .digest("hex");
 
-    // Secure signature comparison
     const expectedBuffer = Buffer.from(expectedSignature, "utf8");
     const receivedBuffer = Buffer.from(signature, "utf8");
 
@@ -56,7 +56,9 @@ export async function POST(req: NextRequest) {
 
     console.log("RAZORPAY WEBHOOK EVENT:", event.event);
 
-    // We only configured order.paid
+    /*
+     * We only need order.paid.
+     */
     if (event.event !== "order.paid") {
       return NextResponse.json({
         success: true,
@@ -71,12 +73,16 @@ export async function POST(req: NextRequest) {
       console.error("Razorpay order/payment ID missing.");
 
       return NextResponse.json(
-        { error: "Order or payment ID missing." },
+        {
+          error: "Order or payment ID missing.",
+        },
         { status: 400 }
       );
     }
 
-    // Find the local order
+    /*
+     * Find local order using Razorpay order ID.
+     */
     const order = await prisma.order.findUnique({
       where: {
         razorpayOrderId,
@@ -91,40 +97,65 @@ export async function POST(req: NextRequest) {
     });
 
     if (!order) {
-      console.error("Local order not found:", razorpayOrderId);
+      console.error(
+        "Local order not found:",
+        razorpayOrderId
+      );
 
-      // Return 200 so Razorpay does not keep retrying
+      /*
+       * Return 200 so Razorpay doesn't repeatedly retry
+       * an event for an order that doesn't exist locally.
+       */
       return NextResponse.json({
         success: true,
         message: "Local order not found.",
       });
     }
 
-    // Prevent duplicate webhook processing
-    if (order.paymentStatus === "PAID") {
-      console.log("Order already marked PAID:", order.orderNumber);
+    /*
+     * If the order is already PAID with the same payment ID,
+     * this webhook has already been processed.
+     */
+    if (
+      order.paymentStatus === "PAID" &&
+      order.razorpayPaymentId === razorpayPaymentId
+    ) {
+      console.log(
+        "Webhook already processed:",
+        order.orderNumber
+      );
 
       return NextResponse.json({
         success: true,
+        paymentUpdated: false,
+        emailSent: false,
         message: "Order already processed.",
       });
     }
 
-    // Mark order as paid
-    await prisma.order.update({
+    /*
+     * If order was marked PAID by the verify API but the
+     * payment ID is not stored, complete the payment details.
+     */
+    const updatedOrder = await prisma.order.update({
       where: {
         id: order.id,
       },
       data: {
-        razorpayPaymentId,
+        razorpayPaymentId: razorpayPaymentId,
         paymentStatus: "PAID",
         orderStatus: "PROCESSING",
       },
     });
 
-    console.log("ORDER MARKED PAID:", order.orderNumber);
+    console.log(
+      "ORDER MARKED PAID:",
+      updatedOrder.orderNumber
+    );
 
-    // Send confirmation email
+    /*
+     * RESEND EMAIL
+     */
     const resendApiKey = process.env.RESEND_API_KEY;
 
     if (!resendApiKey) {
@@ -134,6 +165,7 @@ export async function POST(req: NextRequest) {
         success: true,
         paymentUpdated: true,
         emailSent: false,
+        orderNumber: updatedOrder.orderNumber,
       });
     }
 
@@ -143,14 +175,16 @@ export async function POST(req: NextRequest) {
       .map(
         (item) => `
           <tr>
-            <td style="padding:8px;border-bottom:1px solid #ddd;">
+            <td style="padding:8px;border:1px solid #ddd;">
               ${item.product.name}
             </td>
-            <td style="padding:8px;border-bottom:1px solid #ddd;">
+
+            <td style="padding:8px;border:1px solid #ddd;">
               ${item.quantity}
             </td>
-            <td style="padding:8px;border-bottom:1px solid #ddd;">
-              ₹${item.price}
+
+            <td style="padding:8px;border:1px solid #ddd;">
+              ₹${item.price.toFixed(2)}
             </td>
           </tr>
         `
@@ -159,17 +193,28 @@ export async function POST(req: NextRequest) {
 
     const emailResult = await resend.emails.send({
       from: "Singh Readymade Vastralaya <onboarding@resend.dev>",
-      to: ["mohitkumarsingh7050@gmail.com"],
-      subject: `Payment Successful - Order ${order.orderNumber}`,
-      html: `
-        <div style="font-family:Arial,sans-serif;max-width:650px;margin:auto;">
 
-          <h2 style="color:#1f2937;">
+      to: ["mohitkumarsingh7050@gmail.com"],
+
+      subject: `Payment Successful - Order ${order.orderNumber}`,
+
+      html: `
+        <div
+          style="
+            font-family:Arial,sans-serif;
+            max-width:700px;
+            margin:auto;
+            line-height:1.6;
+          "
+        >
+
+          <h2 style="color:#111827;">
             Payment Successful
           </h2>
 
           <p>
-            A new order has been successfully paid.
+            A new order has been successfully paid on
+            <strong>Singh Readymade Vastralaya</strong>.
           </p>
 
           <hr />
@@ -177,37 +222,90 @@ export async function POST(req: NextRequest) {
           <h3>Order Details</h3>
 
           <p>
-            <strong>Order Number:</strong> ${order.orderNumber}<br />
-            <strong>Customer:</strong> ${order.customerName}<br />
-            <strong>Phone:</strong> ${order.customerPhone}<br />
-            <strong>Email:</strong> ${order.customerEmail}
+            <strong>Order Number:</strong>
+            ${order.orderNumber}
+            <br />
+
+            <strong>Payment Status:</strong>
+            PAID
+            <br />
+
+            <strong>Order Status:</strong>
+            PROCESSING
+            <br />
+
+            <strong>Payment ID:</strong>
+            ${razorpayPaymentId}
+            <br />
+
+            <strong>Total:</strong>
+            ₹${order.total.toFixed(2)}
+          </p>
+
+          <h3>Customer Details</h3>
+
+          <p>
+            <strong>Name:</strong>
+            ${order.customerName}
+            <br />
+
+            <strong>Phone:</strong>
+            ${order.customerPhone}
+            <br />
+
+            <strong>Email:</strong>
+            ${order.customerEmail}
           </p>
 
           <h3>Delivery Address</h3>
 
           <p>
-            ${order.address}<br />
-            ${order.city}, ${order.state} - ${order.pincode}
+            ${order.address}
+            <br />
+
+            ${order.city},
+            ${order.state}
+            -
+            ${order.pincode}
           </p>
 
-          <h3>Items</h3>
+          <h3>Products</h3>
 
           <table
             style="
-              width:100%;
               border-collapse:collapse;
-              border:1px solid #ddd;
+              width:100%;
             "
           >
             <thead>
               <tr>
-                <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">
+                <th
+                  style="
+                    padding:8px;
+                    border:1px solid #ddd;
+                    text-align:left;
+                  "
+                >
                   Product
                 </th>
-                <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">
-                  Qty
+
+                <th
+                  style="
+                    padding:8px;
+                    border:1px solid #ddd;
+                    text-align:left;
+                  "
+                >
+                  Quantity
                 </th>
-                <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">
+
+                <th
+                  style="
+                    padding:8px;
+                    border:1px solid #ddd;
+                    text-align:left;
+                  "
+                >
                   Price
                 </th>
               </tr>
@@ -218,18 +316,26 @@ export async function POST(req: NextRequest) {
             </tbody>
           </table>
 
-          <h3>
-            Total: ₹${order.total}
-          </h3>
+          <br />
 
           <p>
-            <strong>Payment ID:</strong> ${razorpayPaymentId}
+            <strong>Subtotal:</strong>
+            ₹${order.subtotal.toFixed(2)}
+            <br />
+
+            <strong>Delivery:</strong>
+            ₹${order.deliveryCharge.toFixed(2)}
+            <br />
+
+            <strong>Total:</strong>
+            ₹${order.total.toFixed(2)}
           </p>
 
           <hr />
 
-          <p>
-            Singh Readymade Vastralaya
+          <p style="color:#666;font-size:13px;">
+            This is an automatic payment notification from
+            Singh Readymade Vastralaya.
           </p>
 
         </div>
@@ -237,27 +343,40 @@ export async function POST(req: NextRequest) {
     });
 
     if (emailResult.error) {
-      console.error("RESEND EMAIL ERROR:", emailResult.error);
+      console.error(
+        "RESEND EMAIL ERROR:",
+        emailResult.error
+      );
 
       return NextResponse.json({
         success: true,
         paymentUpdated: true,
         emailSent: false,
+        orderNumber: updatedOrder.orderNumber,
       });
     }
 
-    console.log("RESEND EMAIL SUCCESS:", emailResult.data);
+    console.log(
+      "RESEND EMAIL SUCCESS:",
+      emailResult.data
+    );
 
     return NextResponse.json({
       success: true,
       paymentUpdated: true,
       emailSent: true,
+      orderNumber: updatedOrder.orderNumber,
     });
   } catch (error) {
-    console.error("RAZORPAY WEBHOOK ERROR:", error);
+    console.error(
+      "RAZORPAY WEBHOOK ERROR:",
+      error
+    );
 
     return NextResponse.json(
-      { error: "Webhook processing failed." },
+      {
+        error: "Webhook processing failed.",
+      },
       { status: 500 }
     );
   }
