@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { Resend } from "resend";
-import prisma from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,32 +9,34 @@ export async function POST(req: NextRequest) {
 
     if (!webhookSecret) {
       console.error("RAZORPAY_WEBHOOK_SECRET is missing.");
+
       return NextResponse.json(
         { error: "Webhook secret is not configured." },
         { status: 500 }
       );
     }
 
-    // IMPORTANT: Read raw body for Razorpay signature verification
+    // Read the raw request body for Razorpay signature verification
     const rawBody = await req.text();
 
     const signature = req.headers.get("x-razorpay-signature");
 
     if (!signature) {
       console.error("Razorpay webhook signature missing.");
+
       return NextResponse.json(
         { error: "Missing webhook signature." },
         { status: 400 }
       );
     }
 
-    // Generate expected signature
+    // Generate expected Razorpay webhook signature
     const expectedSignature = crypto
       .createHmac("sha256", webhookSecret)
       .update(rawBody)
       .digest("hex");
 
-    // Secure comparison
+    // Secure signature comparison
     const expectedBuffer = Buffer.from(expectedSignature, "utf8");
     const receivedBuffer = Buffer.from(signature, "utf8");
 
@@ -43,6 +45,7 @@ export async function POST(req: NextRequest) {
       !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
     ) {
       console.error("Invalid Razorpay webhook signature.");
+
       return NextResponse.json(
         { error: "Invalid webhook signature." },
         { status: 400 }
@@ -66,13 +69,14 @@ export async function POST(req: NextRequest) {
 
     if (!razorpayOrderId || !razorpayPaymentId) {
       console.error("Razorpay order/payment ID missing.");
+
       return NextResponse.json(
         { error: "Order or payment ID missing." },
         { status: 400 }
       );
     }
 
-    // Find our local order
+    // Find the local order
     const order = await prisma.order.findUnique({
       where: {
         razorpayOrderId,
@@ -89,7 +93,7 @@ export async function POST(req: NextRequest) {
     if (!order) {
       console.error("Local order not found:", razorpayOrderId);
 
-      // Return 200 so Razorpay doesn't keep retrying
+      // Return 200 so Razorpay does not keep retrying
       return NextResponse.json({
         success: true,
         message: "Local order not found.",
@@ -106,7 +110,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Update order as paid
+    // Mark order as paid
     await prisma.order.update({
       where: {
         id: order.id,
@@ -125,6 +129,7 @@ export async function POST(req: NextRequest) {
 
     if (!resendApiKey) {
       console.error("RESEND_API_KEY is missing.");
+
       return NextResponse.json({
         success: true,
         paymentUpdated: true,
@@ -158,7 +163,7 @@ export async function POST(req: NextRequest) {
       subject: `Payment Successful - Order ${order.orderNumber}`,
       html: `
         <div style="font-family:Arial,sans-serif;max-width:650px;margin:auto;">
-          
+
           <h2 style="color:#1f2937;">
             Payment Successful
           </h2>
