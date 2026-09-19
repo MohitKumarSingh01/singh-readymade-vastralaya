@@ -51,13 +51,25 @@ export async function POST(request: NextRequest) {
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
-    const generatedBuffer = Buffer.from(generatedSignature, "utf8");
-    const receivedBuffer = Buffer.from(razorpay_signature, "utf8");
+    const generatedBuffer = Buffer.from(
+      generatedSignature,
+      "utf8"
+    );
+
+    const receivedBuffer = Buffer.from(
+      razorpay_signature,
+      "utf8"
+    );
 
     if (
       generatedBuffer.length !== receivedBuffer.length ||
-      !crypto.timingSafeEqual(generatedBuffer, receivedBuffer)
+      !crypto.timingSafeEqual(
+        generatedBuffer,
+        receivedBuffer
+      )
     ) {
+      console.error("Razorpay payment signature mismatch.");
+
       return NextResponse.json(
         {
           success: false,
@@ -69,11 +81,14 @@ export async function POST(request: NextRequest) {
 
     /*
      * STEP 2
-     * Find our order.
+     * Validate local order ID.
      */
     const numericOrderId = Number(orderId);
 
-    if (!Number.isInteger(numericOrderId) || numericOrderId <= 0) {
+    if (
+      !Number.isInteger(numericOrderId) ||
+      numericOrderId <= 0
+    ) {
       return NextResponse.json(
         {
           success: false,
@@ -83,16 +98,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    /*
+     * STEP 3
+     * Find local order.
+     */
     const order = await prisma.order.findUnique({
       where: {
         id: numericOrderId,
-      },
-      include: {
-        items: {
-          include: {
-            product: true,
-          },
-        },
       },
     });
 
@@ -107,8 +119,9 @@ export async function POST(request: NextRequest) {
     }
 
     /*
-     * STEP 3
-     * Make sure Razorpay order belongs to our order.
+     * STEP 4
+     * Make sure Razorpay order belongs
+     * to our local order.
      */
     if (order.razorpayOrderId !== razorpay_order_id) {
       return NextResponse.json(
@@ -121,9 +134,9 @@ export async function POST(request: NextRequest) {
     }
 
     /*
-     * STEP 4
-     * If webhook already marked the order as PAID,
-     * don't process it again.
+     * STEP 5
+     * If webhook has already processed the payment,
+     * simply return success.
      */
     if (order.paymentStatus === "PAID") {
       return NextResponse.json({
@@ -131,45 +144,41 @@ export async function POST(request: NextRequest) {
         orderNumber: order.orderNumber,
         paymentStatus: order.paymentStatus,
         orderStatus: order.orderStatus,
-        message: "Payment already verified.",
+        message: "Payment already confirmed.",
       });
     }
 
     /*
-     * STEP 5
-     * Mark payment as PAID.
+     * STEP 6
+     * Save the Razorpay payment ID.
+     *
+     * IMPORTANT:
+     * Do NOT mark the order PAID here.
+     *
+     * The Razorpay webhook is responsible for the
+     * final PAID status and email notification.
      */
-    const updatedOrder = await prisma.order.update({
+    await prisma.order.update({
       where: {
         id: order.id,
       },
       data: {
         razorpayPaymentId: razorpay_payment_id,
-        paymentStatus: "PAID",
-        orderStatus: "PROCESSING",
       },
     });
 
-    /*
-     * Email notification is intentionally NOT sent here.
-     *
-     * Razorpay webhook handles:
-     * - order.paid
-     * - payment confirmation
-     * - email notification
-     *
-     * This prevents duplicate emails.
-     */
-
     return NextResponse.json({
       success: true,
-      orderNumber: updatedOrder.orderNumber,
-      paymentStatus: updatedOrder.paymentStatus,
-      orderStatus: updatedOrder.orderStatus,
-      message: "Payment verified successfully.",
+      orderNumber: order.orderNumber,
+      paymentStatus: "PENDING",
+      orderStatus: order.orderStatus,
+      message: "Payment signature verified successfully.",
     });
   } catch (error) {
-    console.error("Payment verification error:", error);
+    console.error(
+      "Payment verification error:",
+      error
+    );
 
     return NextResponse.json(
       {
