@@ -74,7 +74,26 @@ export default function AccountPage() {
   const [selectedOrder, setSelectedOrder] =
     useState<Order | null>(null);
 
-  // Check whether customer is already logged in
+  const [showAddressForm, setShowAddressForm] =
+    useState(false);
+
+  const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
+  const [pincode, setPincode] = useState("");
+
+  const [addressLoading, setAddressLoading] =
+    useState(false);
+
+  const [addressMessage, setAddressMessage] =
+    useState("");
+
+  const [addressSuccess, setAddressSuccess] =
+    useState(false);
+
+  const [deletingAddressId, setDeletingAddressId] =
+    useState<number | null>(null);
+
   useEffect(() => {
     loadCustomer();
   }, []);
@@ -173,16 +192,14 @@ export default function AccountPage() {
         setName("");
         setPhone("");
         setPassword("");
+
         return;
       }
 
-      // Login successful
       setSuccess(true);
       setMessage("Login successful.");
-
       setPassword("");
 
-      // Load the authenticated customer
       await loadCustomer();
     } catch (error) {
       console.error("ACCOUNT ERROR:", error);
@@ -221,6 +238,131 @@ export default function AccountPage() {
     } finally {
       setLogoutLoading(false);
     }
+  }
+
+  async function handleAddAddress(
+    e: FormEvent<HTMLFormElement>
+  ) {
+    e.preventDefault();
+
+    setAddressLoading(true);
+    setAddressMessage("");
+    setAddressSuccess(false);
+
+    try {
+      const response = await fetch(
+        "/api/account/addresses",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            address,
+            city,
+            state,
+            pincode,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setAddressMessage(
+          data?.message ||
+            "Unable to save address."
+        );
+        return;
+      }
+
+      setAddressSuccess(true);
+      setAddressMessage(
+        "Address saved successfully."
+      );
+
+      setAddress("");
+      setCity("");
+      setState("");
+      setPincode("");
+
+      await loadCustomer();
+
+      setTimeout(() => {
+        setShowAddressForm(false);
+        setAddressMessage("");
+        setAddressSuccess(false);
+      }, 1000);
+    } catch (error) {
+      console.error(
+        "ADD ADDRESS ERROR:",
+        error
+      );
+
+      setAddressMessage(
+        "Unable to connect to the server."
+      );
+    } finally {
+      setAddressLoading(false);
+    }
+  }
+
+  async function handleDeleteAddress(
+    addressId: number
+  ) {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this address?"
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDeletingAddressId(addressId);
+
+      const response = await fetch(
+        `/api/account/addresses?id=${addressId}`,
+        {
+          method: "DELETE",
+          credentials: "include",
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(
+          data?.message ||
+            "Unable to delete address."
+        );
+        return;
+      }
+
+      await loadCustomer();
+    } catch (error) {
+      console.error(
+        "DELETE ADDRESS ERROR:",
+        error
+      );
+
+      alert("Unable to delete address.");
+    } finally {
+      setDeletingAddressId(null);
+    }
+  }
+
+  function cancelAddressForm() {
+    setShowAddressForm(false);
+
+    setAddress("");
+    setCity("");
+    setState("");
+    setPincode("");
+
+    setAddressMessage("");
+    setAddressSuccess(false);
   }
 
   if (checkingSession) {
@@ -271,12 +413,12 @@ export default function AccountPage() {
     );
   }
 
-  // Logged-in customer dashboard
   if (user) {
     return (
       <main className="dashboard-page">
         <div className="dashboard-container">
-          {/* Header */}
+
+          {/* Dashboard Header */}
           <div className="dashboard-header">
             <div>
               <p className="eyebrow">
@@ -297,12 +439,15 @@ export default function AccountPage() {
               onClick={handleLogout}
               disabled={logoutLoading}
             >
-              {logoutLoading ? "Logging out..." : "Logout"}
+              {logoutLoading
+                ? "Logging out..."
+                : "Logout"}
             </button>
           </div>
 
           {/* Profile + Address */}
           <div className="dashboard-grid">
+
             {/* Profile */}
             <section className="dashboard-card">
               <div className="card-heading">
@@ -310,6 +455,7 @@ export default function AccountPage() {
                   <span className="card-label">
                     ACCOUNT
                   </span>
+
                   <h2>Profile</h2>
                 </div>
               </div>
@@ -332,55 +478,231 @@ export default function AccountPage() {
               </div>
             </section>
 
-            {/* Saved Address */}
+            {/* Address */}
             <section className="dashboard-card">
-              <div className="card-heading">
+
+              <div className="card-heading address-heading">
                 <div>
                   <span className="card-label">
                     DELIVERY
                   </span>
+
                   <h2>Saved Address</h2>
                 </div>
+
+                {!showAddressForm && (
+                  <button
+                    type="button"
+                    className="add-address-button"
+                    onClick={() => {
+                      setShowAddressForm(true);
+                      setAddressMessage("");
+                    }}
+                  >
+                    + Add Address
+                  </button>
+                )}
               </div>
 
-              {user.addresses &&
-              user.addresses.length > 0 ? (
-                <div className="address-list">
-                  {user.addresses.map((address) => (
-                    <div
-                      className="address-box"
-                      key={address.id}
-                    >
-                      <strong>
-                        {address.address}
-                      </strong>
+              {/* Add Address Form */}
+              {showAddressForm && (
+                <form
+                  className="address-form"
+                  onSubmit={handleAddAddress}
+                >
+                  <label>Full Address</label>
 
-                      <span>
-                        {address.city},{" "}
-                        {address.state}
-                      </span>
+                  <textarea
+                    value={address}
+                    onChange={(e) =>
+                      setAddress(
+                        e.target.value
+                      )
+                    }
+                    placeholder="House No., Street, Area"
+                    rows={3}
+                    required
+                  />
 
-                      <span>
-                        {address.pincode}
-                      </span>
+                  <div className="address-form-grid">
+
+                    <div>
+                      <label>City</label>
+
+                      <input
+                        type="text"
+                        value={city}
+                        onChange={(e) =>
+                          setCity(
+                            e.target.value
+                          )
+                        }
+                        placeholder="City"
+                        required
+                      />
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="empty-address">
-                  <p>No saved address yet.</p>
 
-                  <span>
-                    Your saved delivery addresses
-                    will appear here.
-                  </span>
-                </div>
+                    <div>
+                      <label>State</label>
+
+                      <input
+                        type="text"
+                        value={state}
+                        onChange={(e) =>
+                          setState(
+                            e.target.value
+                          )
+                        }
+                        placeholder="State"
+                        required
+                      />
+                    </div>
+
+                  </div>
+
+                  <label>Pincode</label>
+
+                  <input
+                    type="text"
+                    value={pincode}
+                    onChange={(e) =>
+                      setPincode(
+                        e.target.value
+                          .replace(
+                            /[^0-9]/g,
+                            ""
+                          )
+                          .slice(0, 6)
+                      )
+                    }
+                    placeholder="6-digit pincode"
+                    maxLength={6}
+                    required
+                  />
+
+                  {addressMessage && (
+                    <div
+                      className={
+                        addressSuccess
+                          ? "address-message success"
+                          : "address-message error"
+                      }
+                    >
+                      {addressMessage}
+                    </div>
+                  )}
+
+                  <div className="address-form-actions">
+                    <button
+                      type="button"
+                      className="cancel-address-button"
+                      onClick={
+                        cancelAddressForm
+                      }
+                    >
+                      Cancel
+                    </button>
+
+                    <button
+                      type="submit"
+                      className="save-address-button"
+                      disabled={addressLoading}
+                    >
+                      {addressLoading
+                        ? "Saving..."
+                        : "Save Address"}
+                    </button>
+                  </div>
+                </form>
               )}
+
+              {/* Saved Addresses */}
+              {!showAddressForm &&
+                user.addresses &&
+                user.addresses.length > 0 && (
+                  <div className="address-list">
+                    {user.addresses.map(
+                      (savedAddress) => (
+                        <div
+                          className="address-box"
+                          key={savedAddress.id}
+                        >
+                          <div className="address-content">
+                            <strong>
+                              {
+                                savedAddress.address
+                              }
+                            </strong>
+
+                            <span>
+                              {savedAddress.city},{" "}
+                              {
+                                savedAddress.state
+                              }
+                            </span>
+
+                            <span>
+                              {
+                                savedAddress.pincode
+                              }
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            className="delete-address-button"
+                            onClick={() =>
+                              handleDeleteAddress(
+                                savedAddress.id
+                              )
+                            }
+                            disabled={
+                              deletingAddressId ===
+                              savedAddress.id
+                            }
+                          >
+                            {deletingAddressId ===
+                            savedAddress.id
+                              ? "Deleting..."
+                              : "Delete"}
+                          </button>
+                        </div>
+                      )
+                    )}
+                  </div>
+                )}
+
+              {/* Empty */}
+              {!showAddressForm &&
+                (!user.addresses ||
+                  user.addresses.length === 0) && (
+                  <div className="empty-address">
+                    <p>
+                      No saved address yet.
+                    </p>
+
+                    <span>
+                      Add your delivery address
+                      for faster checkout.
+                    </span>
+
+                    <button
+                      type="button"
+                      className="empty-add-button"
+                      onClick={() =>
+                        setShowAddressForm(true)
+                      }
+                    >
+                      Add Your First Address
+                    </button>
+                  </div>
+                )}
             </section>
           </div>
 
           {/* Orders */}
           <section className="orders-section">
+
             <div className="orders-heading">
               <div>
                 <span className="card-label">
@@ -407,8 +729,8 @@ export default function AccountPage() {
                 <h3>No orders yet</h3>
 
                 <p>
-                  Your orders will appear here after
-                  you make a purchase.
+                  Your orders will appear here
+                  after you make a purchase.
                 </p>
 
                 <Link
@@ -444,8 +766,12 @@ export default function AccountPage() {
 
                       <div className="order-total">
                         <span>Total</span>
+
                         <strong>
-                          ₹{order.total.toFixed(2)}
+                          ₹
+                          {order.total.toFixed(
+                            2
+                          )}
                         </strong>
                       </div>
                     </div>
@@ -459,7 +785,8 @@ export default function AccountPage() {
                             key={item.id}
                           >
                             <div className="product-image">
-                              {item.product.image ? (
+                              {item.product
+                                .image ? (
                                 <img
                                   src={
                                     item.product
@@ -479,7 +806,10 @@ export default function AccountPage() {
 
                             <div className="product-info">
                               <strong>
-                                {item.product.name}
+                                {
+                                  item.product
+                                    .name
+                                }
                               </strong>
 
                               <span>
@@ -500,13 +830,15 @@ export default function AccountPage() {
                       {order.items.length > 3 && (
                         <div className="more-products">
                           +
-                          {order.items.length - 3}{" "}
+                          {order.items.length -
+                            3}{" "}
                           more
                         </div>
                       )}
                     </div>
 
                     <div className="order-bottom">
+
                       <div className="status-group">
                         <div>
                           <span>
@@ -546,6 +878,7 @@ export default function AccountPage() {
                       >
                         View Order
                       </button>
+
                     </div>
                   </div>
                 ))}
@@ -554,7 +887,7 @@ export default function AccountPage() {
           </section>
         </div>
 
-        {/* Order Details Modal */}
+        {/* Order Modal */}
         {selectedOrder && (
           <div
             className="modal-overlay"
@@ -569,6 +902,7 @@ export default function AccountPage() {
               }
             >
               <div className="modal-header">
+
                 <div>
                   <span className="order-label">
                     ORDER DETAILS
@@ -594,9 +928,11 @@ export default function AccountPage() {
                 >
                   ×
                 </button>
+
               </div>
 
               <div className="modal-status">
+
                 <div>
                   <span>Payment</span>
 
@@ -618,10 +954,13 @@ export default function AccountPage() {
                     }
                   />
                 </div>
+
               </div>
 
               <div className="modal-section">
-                <h3>Delivery Address</h3>
+                <h3>
+                  Delivery Address
+                </h3>
 
                 <p>
                   {selectedOrder.address}
@@ -637,11 +976,17 @@ export default function AccountPage() {
                 <h3>Customer</h3>
 
                 <p>
-                  {selectedOrder.customerName}
+                  {
+                    selectedOrder.customerName
+                  }
                   <br />
-                  {selectedOrder.customerPhone}
+                  {
+                    selectedOrder.customerPhone
+                  }
                   <br />
-                  {selectedOrder.customerEmail}
+                  {
+                    selectedOrder.customerEmail
+                  }
                 </p>
               </div>
 
@@ -656,13 +1001,16 @@ export default function AccountPage() {
                         key={item.id}
                       >
                         <div className="modal-product-image">
-                          {item.product.image ? (
+                          {item.product
+                            .image ? (
                             <img
                               src={
-                                item.product.image
+                                item.product
+                                  .image
                               }
                               alt={
-                                item.product.name
+                                item.product
+                                  .name
                               }
                             />
                           ) : (
@@ -674,7 +1022,10 @@ export default function AccountPage() {
 
                         <div className="modal-product-info">
                           <strong>
-                            {item.product.name}
+                            {
+                              item.product
+                                .name
+                            }
                           </strong>
 
                           <span>
@@ -696,8 +1047,10 @@ export default function AccountPage() {
               </div>
 
               <div className="price-summary">
+
                 <div>
                   <span>Subtotal</span>
+
                   <strong>
                     ₹
                     {selectedOrder.subtotal.toFixed(
@@ -708,6 +1061,7 @@ export default function AccountPage() {
 
                 <div>
                   <span>Delivery</span>
+
                   <strong>
                     {selectedOrder.deliveryCharge ===
                     0
@@ -720,6 +1074,7 @@ export default function AccountPage() {
 
                 <div className="grand-total">
                   <span>Total</span>
+
                   <strong>
                     ₹
                     {selectedOrder.total.toFixed(
@@ -727,6 +1082,7 @@ export default function AccountPage() {
                     )}
                   </strong>
                 </div>
+
               </div>
             </div>
           </div>
@@ -737,12 +1093,13 @@ export default function AccountPage() {
     );
   }
 
-  // Login / Signup page
+  {/* Login / Signup */}
   return (
     <main className="account-page">
       <div className="account-container">
-        {/* Left Side */}
+
         <div className="account-intro">
+
           <p className="eyebrow">
             SINGH READYMADE VASTRALAYA
           </p>
@@ -755,11 +1112,12 @@ export default function AccountPage() {
 
           <p className="intro-text">
             Create your account to manage your
-            profile, save addresses and easily track
-            your orders.
+            profile, save addresses and easily
+            track your orders.
           </p>
 
           <div className="benefits">
+
             {[
               "Manage your personal information",
               "Save your delivery address",
@@ -774,12 +1132,14 @@ export default function AccountPage() {
                 {item}
               </div>
             ))}
+
           </div>
         </div>
 
-        {/* Account Card */}
         <div className="account-card">
+
           <div className="tabs">
+
             <button
               type="button"
               onClick={() =>
@@ -807,6 +1167,7 @@ export default function AccountPage() {
             >
               Create Account
             </button>
+
           </div>
 
           <h2>
@@ -822,6 +1183,7 @@ export default function AccountPage() {
           </p>
 
           <form onSubmit={handleSubmit}>
+
             {mode === "signup" && (
               <>
                 <label>Full Name</label>
@@ -836,7 +1198,9 @@ export default function AccountPage() {
                   required
                 />
 
-                <label>Mobile Number</label>
+                <label>
+                  Mobile Number
+                </label>
 
                 <input
                   type="tel"
@@ -899,6 +1263,7 @@ export default function AccountPage() {
                 ? "Login"
                 : "Create Account"}
             </button>
+
           </form>
 
           <Link
@@ -907,6 +1272,7 @@ export default function AccountPage() {
           >
             Continue Shopping
           </Link>
+
         </div>
       </div>
 
@@ -1229,10 +1595,6 @@ const dashboardStyles = `
     cursor: pointer;
   }
 
-  .logout-button:hover {
-    border-color: #d4af37;
-  }
-
   .dashboard-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1246,6 +1608,13 @@ const dashboardStyles = `
     border-radius: 18px;
     padding: 25px;
     box-shadow: 0 10px 30px rgba(11, 35, 66, 0.05);
+  }
+
+  .card-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 15px;
   }
 
   .card-label,
@@ -1291,31 +1660,168 @@ const dashboardStyles = `
     word-break: break-word;
   }
 
+  .add-address-button,
+  .empty-add-button {
+    border: 1px solid #d4af37;
+    border-radius: 8px;
+    padding: 9px 13px;
+    background: #ffffff;
+    color: #0b2342;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .add-address-button:hover,
+  .empty-add-button:hover {
+    background: #d4af37;
+  }
+
+  .address-form {
+    margin-top: 22px;
+  }
+
+  .address-form label {
+    display: block;
+    margin-bottom: 7px;
+    color: #243b59;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .address-form input,
+  .address-form textarea {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 15px;
+    padding: 12px 13px;
+    border: 1px solid #d7dde5;
+    border-radius: 8px;
+    outline: none;
+    background: #ffffff;
+    color: #243b59;
+    font-family: inherit;
+    font-size: 13px;
+    resize: vertical;
+  }
+
+  .address-form input:focus,
+  .address-form textarea:focus {
+    border-color: #d4af37;
+  }
+
+  .address-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .address-form-grid input {
+    margin-bottom: 15px;
+  }
+
+  .address-form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 3px;
+  }
+
+  .cancel-address-button {
+    padding: 10px 16px;
+    border: 1px solid #d7dde5;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #61738b;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .save-address-button {
+    padding: 10px 17px;
+    border: none;
+    border-radius: 8px;
+    background: #d4af37;
+    color: #0b2342;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .save-address-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .address-message {
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+  }
+
+  .address-message.success {
+    background: #ecfdf3;
+    color: #166534;
+  }
+
+  .address-message.error {
+    background: #fff1f2;
+    color: #b42318;
+  }
+
   .address-list {
+    display: grid;
+    gap: 12px;
     margin-top: 22px;
   }
 
   .address-box {
-    display: grid;
-    gap: 5px;
-    padding: 17px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+    padding: 15px;
     border: 1px solid #e5e9ee;
     border-radius: 12px;
+  }
+
+  .address-content {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .address-content strong {
     color: #243b59;
-  }
-
-  .address-box strong {
-    font-size: 14px;
-  }
-
-  .address-box span {
-    color: #61738b;
     font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .address-content span {
+    color: #61738b;
+    font-size: 12px;
+  }
+
+  .delete-address-button {
+    flex-shrink: 0;
+    border: none;
+    background: transparent;
+    color: #b42318;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .delete-address-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .empty-address {
     margin-top: 22px;
-    padding: 22px;
+    padding: 25px 15px;
     border: 1px dashed #d5dbe2;
     border-radius: 12px;
     text-align: center;
@@ -1328,6 +1834,8 @@ const dashboardStyles = `
   }
 
   .empty-address span {
+    display: block;
+    margin-bottom: 16px;
     color: #8a96a5;
     font-size: 13px;
   }
@@ -1758,6 +2266,16 @@ const dashboardStyles = `
     .dashboard-card,
     .orders-section {
       padding: 18px;
+    }
+
+    .address-form-grid {
+      grid-template-columns: 1fr;
+      gap: 0;
+    }
+
+    .address-box {
+      align-items: flex-start;
+      flex-direction: column;
     }
 
     .order-top {
