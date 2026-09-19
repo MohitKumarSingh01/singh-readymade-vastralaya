@@ -7,6 +7,32 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  phone     String
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  addresses Address[]
+  orders    Order[]
+}
+
+model Address {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  address   String
+  city      String
+  state     String
+  pincode   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
 model Product {
   id          Int         @id @default(autoincrement())
   name        String
@@ -46,6 +72,10 @@ model Order {
   orderStatus       String      @default("PENDING")
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
+
+  userId            Int?
+  user              User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
   items             OrderItem[]
 }
 
@@ -55,6 +85,7 @@ model OrderItem {
   price     Float
   productId Int
   orderId   Int
+
   product   Product @relation(fields: [productId], references: [id])
   order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }
