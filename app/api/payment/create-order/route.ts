@@ -1,26 +1,53 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
+import { getCustomerUserId } from "@/lib/customerAuth";
 
-export async function POST(request: NextRequest) {
+function generateOrderNumber() {
+  const timestamp = Date.now().toString();
+  const random = crypto
+    .randomBytes(3)
+    .toString("hex")
+    .toUpperCase();
+
+  return `SRV-${timestamp}-${random}`;
+}
+
+export async function POST(req: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await req.json();
 
-    const items = Array.isArray(body.items) ? body.items : [];
+    const customerName = String(
+      body.customerName || ""
+    ).trim();
 
-    const customerName = String(body.customerName || "").trim();
-    const customerEmail = String(body.customerEmail || "").trim();
-    const customerPhone = String(body.customerPhone || "").trim();
-    const address = String(body.address || "").trim();
+    const customerEmail = String(
+      body.customerEmail || ""
+    )
+      .trim()
+      .toLowerCase();
+
+    const customerPhone = String(
+      body.customerPhone || ""
+    ).trim();
+
+    const address = String(
+      body.address || ""
+    ).trim();
+
     const city = String(body.city || "").trim();
-    const state = String(body.state || "").trim();
-    const pincode = String(body.pincode || "").trim();
 
-    if (!items.length) {
-      return NextResponse.json(
-        { error: "Cart is empty." },
-        { status: 400 }
-      );
-    }
+    const state = String(
+      body.state || ""
+    ).trim();
+
+    const pincode = String(
+      body.pincode || ""
+    ).trim();
+
+    const items = Array.isArray(body.items)
+      ? body.items
+      : [];
 
     if (
       !customerName ||
@@ -32,14 +59,76 @@ export async function POST(request: NextRequest) {
       !pincode
     ) {
       return NextResponse.json(
-        { error: "Please provide complete customer details." },
+        {
+          success: false,
+          message:
+            "Customer and delivery details are required.",
+        },
         { status: 400 }
       );
     }
 
-    const productIds = items.map((item: any) =>
-      Number(item.id)
-    );
+    if (!items.length) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Your cart is empty.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!/^[0-9]{10}$/.test(customerPhone)) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Please enter a valid 10-digit mobile number.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!/^[0-9]{6}$/.test(pincode)) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Please enter a valid 6-digit pincode.",
+        },
+        { status: 400 }
+      );
+    }
+
+    /*
+     * If the customer is logged in,
+     * attach the order to their account.
+     *
+     * Guest checkout will continue to work
+     * because userId can remain null.
+     */
+    const userId = getCustomerUserId(req);
+
+    /*
+     * Fetch products from database instead of
+     * trusting prices sent from the browser.
+     */
+    const productIds = items
+      .map((item: any) => Number(item.productId))
+      .filter(
+        (id: number) =>
+          Number.isInteger(id) && id > 0
+      );
+
+    if (!productIds.length) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid cart items.",
+        },
+        { status: 400 }
+      );
+    }
 
     const products = await prisma.product.findMany({
       where: {
@@ -51,153 +140,171 @@ export async function POST(request: NextRequest) {
 
     if (products.length !== productIds.length) {
       return NextResponse.json(
-        { error: "One or more products are unavailable." },
+        {
+          success: false,
+          message:
+            "One or more products are no longer available.",
+        },
         { status: 400 }
       );
     }
 
     let subtotal = 0;
 
-    const orderItems = items.map((item: any) => {
-      const product = products.find(
-        (p) => p.id === Number(item.id)
-      );
+    const orderItems = [];
 
-      if (!product) {
-        throw new Error("Product not found.");
-      }
+    for (const item of items) {
+      const productId = Number(item.productId);
+      const quantity = Number(item.quantity);
 
-      const quantity = Math.max(
-        1,
-        Number(item.qty) || 1
-      );
-
-      if (product.stock < quantity) {
-        throw new Error(
-          `${product.name} does not have enough stock.`
+      if (
+        !Number.isInteger(productId) ||
+        productId <= 0
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Invalid product in cart.",
+          },
+          { status: 400 }
         );
       }
 
-      subtotal += product.price * quantity;
+      if (
+        !Number.isInteger(quantity) ||
+        quantity <= 0
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              "Invalid product quantity.",
+          },
+          { status: 400 }
+        );
+      }
 
-      return {
+      const product = products.find(
+        (p) => p.id === productId
+      );
+
+      if (!product) {
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              "One or more products are no longer available.",
+          },
+          { status: 400 }
+        );
+      }
+
+      if (product.stock < quantity) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: `${product.name} has only ${product.stock} item(s) in stock.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      const itemTotal =
+        product.price * quantity;
+
+      subtotal += itemTotal;
+
+      orderItems.push({
         productId: product.id,
         quantity,
         price: product.price,
-      };
-    });
-
-    const deliveryCharge = subtotal >= 999 ? 0 : 99;
-    const total = subtotal + deliveryCharge;
-
-    const razorpayKeyId =
-      process.env.RAZORPAY_KEY_ID;
-
-    const razorpayKeySecret =
-      process.env.RAZORPAY_KEY_SECRET;
-
-    if (!razorpayKeyId || !razorpayKeySecret) {
-      return NextResponse.json(
-        {
-          error:
-            "Razorpay keys are not configured on the server.",
-        },
-        { status: 500 }
-      );
+      });
     }
 
-    const orderNumber = `SRV-${Date.now()}`;
+    /*
+     * Current delivery rule:
+     * Free delivery above ₹999.
+     * Otherwise ₹49.
+     */
+    const deliveryCharge =
+      subtotal >= 999 ? 0 : 49;
 
-    const razorpayResponse = await fetch(
-      "https://api.razorpay.com/v1/orders",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization:
-            "Basic " +
-            Buffer.from(
-              `${razorpayKeyId}:${razorpayKeySecret}`
-            ).toString("base64"),
-        },
-        body: JSON.stringify({
-          amount: Math.round(total * 100),
-          currency: "INR",
-          receipt: orderNumber,
-          notes: {
-            customerName,
-            customerPhone,
-          },
-        }),
-      }
-    );
+    const total =
+      subtotal + deliveryCharge;
 
-    const razorpayOrder =
-      await razorpayResponse.json();
+    const orderNumber =
+      generateOrderNumber();
 
-    if (!razorpayResponse.ok) {
-      console.error(
-        "Razorpay order error:",
-        razorpayOrder
-      );
-
-      return NextResponse.json(
-        {
-          error:
-            razorpayOrder?.error?.description ||
-            "Unable to create Razorpay order.",
-        },
-        { status: 500 }
-      );
-    }
-
+    /*
+     * Create database order.
+     *
+     * userId is automatically saved when the
+     * customer is logged in.
+     */
     const order = await prisma.order.create({
       data: {
         orderNumber,
+
         customerName,
         customerEmail,
         customerPhone,
+
         address,
         city,
         state,
         pincode,
+
         subtotal,
         deliveryCharge,
         total,
-        razorpayOrderId: razorpayOrder.id,
+
         paymentStatus: "PENDING",
         orderStatus: "PENDING",
+
+        userId: userId || null,
 
         items: {
           create: orderItems,
         },
       },
+
       include: {
-        items: true,
+        items: {
+          include: {
+            product: true,
+          },
+        },
       },
     });
 
     return NextResponse.json({
       success: true,
-      orderId: order.id,
-      orderNumber: order.orderNumber,
-      razorpayOrderId: razorpayOrder.id,
-      amount: Math.round(total * 100),
-      currency: "INR",
-      keyId: razorpayKeyId,
+      message: "Order created successfully.",
+      order: {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        subtotal: order.subtotal,
+        deliveryCharge: order.deliveryCharge,
+        total: order.total,
+        paymentStatus:
+          order.paymentStatus,
+        orderStatus:
+          order.orderStatus,
+        userId: order.userId,
+        items: order.items,
+      },
     });
   } catch (error) {
     console.error(
-      "Create order error:",
+      "CREATE ORDER ERROR:",
       error
     );
 
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to create order.",
+        success: false,
+        message:
+          "Unable to create order. Please try again.",
       },
       { status: 500 }
     );
