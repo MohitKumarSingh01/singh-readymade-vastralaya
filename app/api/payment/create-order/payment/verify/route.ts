@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import { Resend } from "resend";
 import { prisma } from "@/lib/prisma";
 
 export async function POST(request: NextRequest) {
@@ -32,6 +31,8 @@ export async function POST(request: NextRequest) {
     const secret = process.env.RAZORPAY_KEY_SECRET;
 
     if (!secret) {
+      console.error("RAZORPAY_KEY_SECRET is missing.");
+
       return NextResponse.json(
         {
           success: false,
@@ -41,13 +42,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    /*
+     * STEP 1
+     * Verify Razorpay payment signature.
+     */
     const generatedSignature = crypto
       .createHmac("sha256", secret)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
-    const generatedBuffer = Buffer.from(generatedSignature);
-    const receivedBuffer = Buffer.from(razorpay_signature);
+    const generatedBuffer = Buffer.from(generatedSignature, "utf8");
+    const receivedBuffer = Buffer.from(razorpay_signature, "utf8");
 
     if (
       generatedBuffer.length !== receivedBuffer.length ||
@@ -62,9 +67,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    /*
+     * STEP 2
+     * Find our order.
+     */
+    const numericOrderId = Number(orderId);
+
+    if (!Number.isInteger(numericOrderId) || numericOrderId <= 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid order ID.",
+        },
+        { status: 400 }
+      );
+    }
+
     const order = await prisma.order.findUnique({
       where: {
-        id: Number(orderId),
+        id: numericOrderId,
       },
       include: {
         items: {
@@ -85,6 +106,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    /*
+     * STEP 3
+     * Make sure Razorpay order belongs to our order.
+     */
     if (order.razorpayOrderId !== razorpay_order_id) {
       return NextResponse.json(
         {
@@ -95,7 +120,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await prisma.order.update({
+    /*
+     * STEP 4
+     * If webhook already marked the order as PAID,
+     * don't process it again.
+     */
+    if (order.paymentStatus === "PAID") {
+      return NextResponse.json({
+        success: true,
+        orderNumber: order.orderNumber,
+        paymentStatus: order.paymentStatus,
+        orderStatus: order.orderStatus,
+        message: "Payment already verified.",
+      });
+    }
+
+    /*
+     * STEP 5
+     * Mark payment as PAID.
+     */
+    const updatedOrder = await prisma.order.update({
       where: {
         id: order.id,
       },
@@ -106,152 +150,23 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // ==============================
-    // RESEND EMAIL NOTIFICATION
-    // ==============================
-
-    const resendApiKey = process.env.RESEND_API_KEY;
-
-    if (!resendApiKey) {
-      console.error("RESEND_API_KEY is missing in Vercel.");
-
-      return NextResponse.json(
-        {
-          success: true,
-          orderNumber: order.orderNumber,
-          emailSent: false,
-          emailError: "RESEND_API_KEY is missing.",
-        },
-        { status: 200 }
-      );
-    }
-
-    const resend = new Resend(resendApiKey);
-
-    const itemsHtml = order.items
-      .map(
-        (item) => `
-          <tr>
-            <td style="padding:8px;border:1px solid #ddd;">
-              ${item.product.name}
-            </td>
-            <td style="padding:8px;border:1px solid #ddd;">
-              ${item.quantity}
-            </td>
-            <td style="padding:8px;border:1px solid #ddd;">
-              ₹${item.price.toFixed(2)}
-            </td>
-          </tr>
-        `
-      )
-      .join("");
-
-    const { data: emailData, error: emailError } =
-      await resend.emails.send({
-        from: "Singh Readymade Vastralaya <onboarding@resend.dev>",
-        to: ["mohitkumarsingh7050@gnmail.com"],
-        subject: `New Order Received - ${order.orderNumber}`,
-        html: `
-          <div style="font-family:Arial,sans-serif;max-width:700px;margin:auto;line-height:1.6;">
-            
-            <h2 style="color:#111827;">
-              New Order Received
-            </h2>
-
-            <p>
-              A new order has been successfully placed on
-              <strong>Singh Readymade Vastralaya</strong>.
-            </p>
-
-            <hr />
-
-            <h3>Order Details</h3>
-
-            <p>
-              <strong>Order Number:</strong> ${order.orderNumber}<br />
-              <strong>Payment Status:</strong> ${order.paymentStatus}<br />
-              <strong>Order Status:</strong> ${order.orderStatus}<br />
-              <strong>Order Total:</strong> ₹${order.total.toFixed(2)}
-            </p>
-
-            <h3>Customer Details</h3>
-
-            <p>
-              <strong>Name:</strong> ${order.customerName}<br />
-              <strong>Phone:</strong> ${order.customerPhone}<br />
-              <strong>Email:</strong> ${order.customerEmail}
-            </p>
-
-            <h3>Delivery Address</h3>
-
-            <p>
-              ${order.address}<br />
-              ${order.city}, ${order.state} - ${order.pincode}
-            </p>
-
-            <h3>Products</h3>
-
-            <table style="border-collapse:collapse;width:100%;">
-              <thead>
-                <tr>
-                  <th style="padding:8px;border:1px solid #ddd;text-align:left;">
-                    Product
-                  </th>
-                  <th style="padding:8px;border:1px solid #ddd;text-align:left;">
-                    Quantity
-                  </th>
-                  <th style="padding:8px;border:1px solid #ddd;text-align:left;">
-                    Price
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                ${itemsHtml}
-              </tbody>
-            </table>
-
-            <br />
-
-            <p>
-              <strong>Subtotal:</strong> ₹${order.subtotal.toFixed(2)}<br />
-              <strong>Delivery:</strong> ₹${order.deliveryCharge.toFixed(2)}<br />
-              <strong>Total:</strong> ₹${order.total.toFixed(2)}
-            </p>
-
-            <hr />
-
-            <p style="color:#666;font-size:13px;">
-              This is an automatic order notification from
-              Singh Readymade Vastralaya.
-            </p>
-
-          </div>
-        `,
-      });
-
-    if (emailError) {
-      console.error("RESEND EMAIL ERROR:", emailError);
-
-      return NextResponse.json(
-        {
-          success: true,
-          orderNumber: order.orderNumber,
-          emailSent: false,
-          emailError: emailError.message,
-        },
-        { status: 200 }
-      );
-    }
-
-    console.log("RESEND EMAIL SUCCESS:", emailData);
+    /*
+     * Email notification is intentionally NOT sent here.
+     *
+     * Razorpay webhook handles:
+     * - order.paid
+     * - payment confirmation
+     * - email notification
+     *
+     * This prevents duplicate emails.
+     */
 
     return NextResponse.json({
       success: true,
-      orderNumber: order.orderNumber,
-      emailSent: true,
-      emailId: emailData?.id || null,
-      message: "Payment verified and email sent successfully.",
+      orderNumber: updatedOrder.orderNumber,
+      paymentStatus: updatedOrder.paymentStatus,
+      orderStatus: updatedOrder.orderStatus,
+      message: "Payment verified successfully.",
     });
   } catch (error) {
     console.error("Payment verification error:", error);
