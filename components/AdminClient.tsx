@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 export function AdminClient({
@@ -9,6 +9,10 @@ export function AdminClient({
   initialProducts: any[];
 }) {
   const [products, setProducts] = useState(initialProducts);
+
+  const [orders, setOrders] = useState<any[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersError, setOrdersError] = useState("");
 
   const [form, setForm] = useState<any>({
     name: "",
@@ -27,7 +31,45 @@ export function AdminClient({
 
   const [saving, setSaving] = useState(false);
 
-  async function save(e: React.FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    async function loadOrders() {
+      try {
+        setOrdersLoading(true);
+        setOrdersError("");
+
+        const response = await fetch(
+          "/api/admin/orders",
+          {
+            cache: "no-store",
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            data?.error || "Unable to load orders."
+          );
+        }
+
+        setOrders(data.orders || []);
+      } catch (error) {
+        setOrdersError(
+          error instanceof Error
+            ? error.message
+            : "Unable to load orders."
+        );
+      } finally {
+        setOrdersLoading(false);
+      }
+    }
+
+    loadOrders();
+  }, []);
+
+  async function save(
+    e: React.FormEvent<HTMLFormElement>
+  ) {
     e.preventDefault();
 
     if (!form.name.trim()) {
@@ -38,21 +80,30 @@ export function AdminClient({
     setSaving(true);
 
     try {
-      const response = await fetch("/api/products", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(form),
-      });
+      const response = await fetch(
+        "/api/products",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(form),
+        }
+      );
 
       const product = await response.json();
 
       if (!response.ok) {
-        throw new Error(product?.error || "Failed to add product");
+        throw new Error(
+          product?.error ||
+            "Failed to add product"
+        );
       }
 
-      setProducts((current) => [product, ...current]);
+      setProducts((current) => [
+        product,
+        ...current,
+      ]);
 
       setForm({
         ...form,
@@ -80,16 +131,23 @@ export function AdminClient({
     if (!confirmed) return;
 
     try {
-      const response = await fetch(`/api/products/${id}`, {
-        method: "DELETE",
-      });
+      const response = await fetch(
+        `/api/products/${id}`,
+        {
+          method: "DELETE",
+        }
+      );
 
       if (!response.ok) {
-        throw new Error("Failed to delete product");
+        throw new Error(
+          "Failed to delete product"
+        );
       }
 
       setProducts((current) =>
-        current.filter((product) => product.id !== id)
+        current.filter(
+          (product) => product.id !== id
+        )
       );
     } catch (error) {
       alert(
@@ -103,6 +161,8 @@ export function AdminClient({
   return (
     <main className="admin">
       <div className="container">
+        {/* ADMIN HEADER */}
+
         <div className="admin-header">
           <div>
             <p className="eyebrow">
@@ -112,13 +172,21 @@ export function AdminClient({
             <h1>Catalogue Admin</h1>
           </div>
 
-          <Link href="/" className="btn dark">
+          <Link
+            href="/"
+            className="btn dark"
+          >
             View store
           </Link>
         </div>
 
+        {/* PRODUCTS */}
+
         <div className="admin-grid">
-          <form className="admin-form" onSubmit={save}>
+          <form
+            className="admin-form"
+            onSubmit={save}
+          >
             <h2>Add product</h2>
 
             <input
@@ -176,7 +244,9 @@ export function AdminClient({
               onChange={(e) =>
                 setForm({
                   ...form,
-                  price: Number(e.target.value),
+                  price: Number(
+                    e.target.value
+                  ),
                 })
               }
               required
@@ -189,7 +259,9 @@ export function AdminClient({
               onChange={(e) =>
                 setForm({
                   ...form,
-                  mrp: Number(e.target.value),
+                  mrp: Number(
+                    e.target.value
+                  ),
                 })
               }
               required
@@ -201,7 +273,8 @@ export function AdminClient({
               onChange={(e) =>
                 setForm({
                   ...form,
-                  description: e.target.value,
+                  description:
+                    e.target.value,
                 })
               }
             />
@@ -249,7 +322,9 @@ export function AdminClient({
               onChange={(e) =>
                 setForm({
                   ...form,
-                  stock: Number(e.target.value),
+                  stock: Number(
+                    e.target.value
+                  ),
                 })
               }
               required
@@ -260,12 +335,16 @@ export function AdminClient({
               className="btn dark"
               disabled={saving}
             >
-              {saving ? "Adding..." : "Add product"}
+              {saving
+                ? "Adding..."
+                : "Add product"}
             </button>
           </form>
 
           <section className="admin-products">
-            <h2>{products.length} products</h2>
+            <h2>
+              {products.length} products
+            </h2>
 
             {products.map((product) => (
               <div
@@ -278,17 +357,22 @@ export function AdminClient({
                 />
 
                 <div>
-                  <h3>{product.name}</h3>
+                  <h3>
+                    {product.name}
+                  </h3>
 
                   <p>
-                    {product.brand} · ₹{product.price} ·
-                    {" "}stock {product.stock}
+                    {product.brand} · ₹
+                    {product.price} · stock{" "}
+                    {product.stock}
                   </p>
                 </div>
 
                 <button
                   type="button"
-                  onClick={() => del(product.id)}
+                  onClick={() =>
+                    del(product.id)
+                  }
                 >
                   Delete
                 </button>
@@ -296,6 +380,398 @@ export function AdminClient({
             ))}
           </section>
         </div>
+
+        {/* ORDERS */}
+
+        <section
+          className="admin-products"
+          style={{
+            marginTop: "35px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent:
+                "space-between",
+              alignItems: "center",
+              gap: "20px",
+              marginBottom: "20px",
+            }}
+          >
+            <div>
+              <p className="eyebrow">
+                CUSTOMER ORDERS
+              </p>
+
+              <h2
+                style={{
+                  margin: 0,
+                }}
+              >
+                {orders.length} Orders
+              </h2>
+            </div>
+
+            <button
+              type="button"
+              className="btn light"
+              onClick={() =>
+                window.location.reload()
+              }
+            >
+              Refresh
+            </button>
+          </div>
+
+          {ordersLoading && (
+            <div
+              style={{
+                padding: "30px",
+                textAlign: "center",
+                color: "#64748b",
+              }}
+            >
+              Loading orders...
+            </div>
+          )}
+
+          {ordersError && (
+            <div
+              style={{
+                padding: "18px",
+                borderRadius: "12px",
+                background: "#fee2e2",
+                color: "#991b1b",
+              }}
+            >
+              {ordersError}
+            </div>
+          )}
+
+          {!ordersLoading &&
+            !ordersError &&
+            orders.length === 0 && (
+              <div
+                style={{
+                  padding: "40px",
+                  textAlign: "center",
+                  color: "#64748b",
+                }}
+              >
+                <h3>No orders yet</h3>
+
+                <p>
+                  Customer orders will appear
+                  here after successful payment.
+                </p>
+              </div>
+            )}
+
+          {!ordersLoading &&
+            !ordersError &&
+            orders.map((order) => (
+              <div
+                key={order.id}
+                style={{
+                  marginBottom: "18px",
+                  padding: "22px",
+                  border:
+                    "1px solid rgba(11,31,58,0.08)",
+                  borderRadius: "16px",
+                  background:
+                    "rgba(248,250,252,0.8)",
+                }}
+              >
+                {/* Order heading */}
+
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent:
+                      "space-between",
+                    alignItems: "flex-start",
+                    gap: "20px",
+                    flexWrap: "wrap",
+                    marginBottom: "18px",
+                  }}
+                >
+                  <div>
+                    <p
+                      style={{
+                        margin: "0 0 5px",
+                        fontSize: "12px",
+                        color: "#64748b",
+                      }}
+                    >
+                      ORDER NUMBER
+                    </p>
+
+                    <h3
+                      style={{
+                        margin: 0,
+                        color: "#071a33",
+                      }}
+                    >
+                      {order.orderNumber}
+                    </h3>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "8px",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span
+                      style={{
+                        padding:
+                          "7px 12px",
+                        borderRadius: "999px",
+                        background:
+                          order.paymentStatus ===
+                          "PAID"
+                            ? "#dcfce7"
+                            : "#fef3c7",
+                        color:
+                          order.paymentStatus ===
+                          "PAID"
+                            ? "#166534"
+                            : "#92400e",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                      }}
+                    >
+                      Payment:{" "}
+                      {order.paymentStatus}
+                    </span>
+
+                    <span
+                      style={{
+                        padding:
+                          "7px 12px",
+                        borderRadius: "999px",
+                        background:
+                          "#e0e7ff",
+                        color:
+                          "#3730a3",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                      }}
+                    >
+                      Order:{" "}
+                      {order.orderStatus}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Customer */}
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(2, minmax(0, 1fr))",
+                    gap: "18px",
+                    marginBottom: "20px",
+                  }}
+                >
+                  <div>
+                    <strong>
+                      Customer
+                    </strong>
+
+                    <p
+                      style={{
+                        margin:
+                          "6px 0 0",
+                        color:
+                          "#64748b",
+                      }}
+                    >
+                      {order.customerName}
+                    </p>
+                  </div>
+
+                  <div>
+                    <strong>
+                      Phone
+                    </strong>
+
+                    <p
+                      style={{
+                        margin:
+                          "6px 0 0",
+                        color:
+                          "#64748b",
+                      }}
+                    >
+                      {order.customerPhone}
+                    </p>
+                  </div>
+
+                  <div>
+                    <strong>
+                      Email
+                    </strong>
+
+                    <p
+                      style={{
+                        margin:
+                          "6px 0 0",
+                        color:
+                          "#64748b",
+                        wordBreak:
+                          "break-word",
+                      }}
+                    >
+                      {order.customerEmail}
+                    </p>
+                  </div>
+
+                  <div>
+                    <strong>
+                      Order Date
+                    </strong>
+
+                    <p
+                      style={{
+                        margin:
+                          "6px 0 0",
+                        color:
+                          "#64748b",
+                      }}
+                    >
+                      {new Date(
+                        order.createdAt
+                      ).toLocaleString(
+                        "en-IN"
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Address */}
+
+                <div
+                  style={{
+                    marginBottom: "20px",
+                    padding: "16px",
+                    borderRadius: "12px",
+                    background:
+                      "#ffffff",
+                  }}
+                >
+                  <strong>
+                    Delivery Address
+                  </strong>
+
+                  <p
+                    style={{
+                      margin:
+                        "7px 0 0",
+                      color:
+                        "#64748b",
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    {order.address}
+                    <br />
+                    {order.city},{" "}
+                    {order.state} -{" "}
+                    {order.pincode}
+                  </p>
+                </div>
+
+                {/* Products */}
+
+                <div>
+                  <strong>
+                    Products
+                  </strong>
+
+                  <div
+                    style={{
+                      marginTop:
+                        "10px",
+                    }}
+                  >
+                    {order.items.map(
+                      (item: any) => (
+                        <div
+                          key={item.id}
+                          style={{
+                            display:
+                              "flex",
+                            justifyContent:
+                              "space-between",
+                            gap: "15px",
+                            padding:
+                              "10px 0",
+                            borderBottom:
+                              "1px solid rgba(11,31,58,0.08)",
+                          }}
+                        >
+                          <span>
+                            {item.product
+                              ?.name ||
+                              "Product"}{" "}
+                            ×{" "}
+                            {item.quantity}
+                          </span>
+
+                          <strong>
+                            ₹
+                            {(
+                              item.price *
+                              item.quantity
+                            ).toLocaleString(
+                              "en-IN"
+                            )}
+                          </strong>
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+
+                {/* Total */}
+
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent:
+                      "space-between",
+                    alignItems: "center",
+                    marginTop: "18px",
+                    paddingTop:
+                      "16px",
+                    borderTop:
+                      "2px solid rgba(11,31,58,0.08)",
+                  }}
+                >
+                  <strong>
+                    Total
+                  </strong>
+
+                  <strong
+                    style={{
+                      fontSize:
+                        "22px",
+                      color:
+                        "#071a33",
+                    }}
+                  >
+                    ₹
+                    {order.total.toLocaleString(
+                      "en-IN"
+                    )}
+                  </strong>
+                </div>
+              </div>
+            ))}
+        </section>
       </div>
     </main>
   );
