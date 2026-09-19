@@ -13,6 +13,9 @@ export function AdminClient({
   const [orders, setOrders] = useState<any[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersError, setOrdersError] = useState("");
+  const [updatingOrderId, setUpdatingOrderId] = useState<number | null>(
+    null
+  );
 
   const [form, setForm] = useState<any>({
     name: "",
@@ -37,12 +40,9 @@ export function AdminClient({
         setOrdersLoading(true);
         setOrdersError("");
 
-        const response = await fetch(
-          "/api/admin/orders",
-          {
-            cache: "no-store",
-          }
-        );
+        const response = await fetch("/api/admin/orders", {
+          cache: "no-store",
+        });
 
         const data = await response.json();
 
@@ -66,6 +66,55 @@ export function AdminClient({
 
     loadOrders();
   }, []);
+
+  async function updateOrderStatus(
+    orderId: number,
+    orderStatus: string
+  ) {
+    try {
+      setUpdatingOrderId(orderId);
+
+      const response = await fetch(
+        `/api/admin/orders/${orderId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            orderStatus,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data?.error || "Unable to update order status."
+        );
+      }
+
+      setOrders((currentOrders) =>
+        currentOrders.map((order) =>
+          order.id === orderId
+            ? {
+                ...order,
+                orderStatus: data.order.orderStatus,
+              }
+            : order
+        )
+      );
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Unable to update order status."
+      );
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  }
 
   async function save(
     e: React.FormEvent<HTMLFormElement>
@@ -522,8 +571,11 @@ export function AdminClient({
                       display: "flex",
                       gap: "8px",
                       flexWrap: "wrap",
+                      alignItems: "center",
                     }}
                   >
+                    {/* Payment Status */}
+
                     <span
                       style={{
                         padding:
@@ -547,6 +599,8 @@ export function AdminClient({
                       {order.paymentStatus}
                     </span>
 
+                    {/* Order Status */}
+
                     <span
                       style={{
                         padding:
@@ -554,8 +608,7 @@ export function AdminClient({
                         borderRadius: "999px",
                         background:
                           "#e0e7ff",
-                        color:
-                          "#3730a3",
+                        color: "#3730a3",
                         fontSize: "12px",
                         fontWeight: 700,
                       }}
@@ -563,6 +616,73 @@ export function AdminClient({
                       Order:{" "}
                       {order.orderStatus}
                     </span>
+
+                    {/* Status Update */}
+
+                    <select
+                      value={
+                        order.orderStatus
+                      }
+                      disabled={
+                        updatingOrderId ===
+                        order.id
+                      }
+                      onChange={(e) =>
+                        updateOrderStatus(
+                          order.id,
+                          e.target.value
+                        )
+                      }
+                      style={{
+                        padding:
+                          "7px 10px",
+                        borderRadius: "8px",
+                        border:
+                          "1px solid #d1d5db",
+                        background:
+                          "#ffffff",
+                        color: "#111827",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        cursor:
+                          updatingOrderId ===
+                          order.id
+                            ? "not-allowed"
+                            : "pointer",
+                      }}
+                    >
+                      <option value="PENDING">
+                        Pending
+                      </option>
+
+                      <option value="PROCESSING">
+                        Processing
+                      </option>
+
+                      <option value="SHIPPED">
+                        Shipped
+                      </option>
+
+                      <option value="DELIVERED">
+                        Delivered
+                      </option>
+
+                      <option value="CANCELLED">
+                        Cancelled
+                      </option>
+                    </select>
+
+                    {updatingOrderId ===
+                      order.id && (
+                      <span
+                        style={{
+                          fontSize: "12px",
+                          color: "#64748b",
+                        }}
+                      >
+                        Updating...
+                      </span>
+                    )}
                   </div>
                 </div>
 
