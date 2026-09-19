@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { promisify } from "util";
 import { prisma } from "@/lib/prisma";
+import { createCustomerSession } from "@/lib/customerAuth";
 
 const scryptAsync = promisify(crypto.scrypt);
 
@@ -22,7 +23,10 @@ async function verifyPassword(
       64
     )) as Buffer;
 
-    const storedHashBuffer = Buffer.from(storedHash, "hex");
+    const storedHashBuffer = Buffer.from(
+      storedHash,
+      "hex"
+    );
 
     if (derivedKey.length !== storedHashBuffer.length) {
       return false;
@@ -88,7 +92,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: "Login successful.",
       user: {
@@ -98,6 +102,10 @@ export async function POST(req: NextRequest) {
         phone: user.phone,
       },
     });
+
+    createCustomerSession(response, user.id);
+
+    return response;
   } catch (error) {
     console.error("LOGIN ERROR:", error);
 
