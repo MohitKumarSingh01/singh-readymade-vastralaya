@@ -1,53 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { getCustomerUserId } from "@/lib/customerAuth";
 
-function generateOrderNumber() {
-  const timestamp = Date.now().toString();
-  const random = crypto
-    .randomBytes(3)
-    .toString("hex")
-    .toUpperCase();
-
-  return `SRV-${timestamp}-${random}`;
-}
+type CartItem = {
+  productId: number;
+  quantity: number;
+};
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    const customerName = String(
-      body.customerName || ""
-    ).trim();
+    const items = body.items as CartItem[];
 
-    const customerEmail = String(
-      body.customerEmail || ""
-    )
-      .trim()
-      .toLowerCase();
-
-    const customerPhone = String(
-      body.customerPhone || ""
-    ).trim();
-
-    const address = String(
-      body.address || ""
-    ).trim();
-
+    const customerName = String(body.customerName || "").trim();
+    const customerEmail = String(body.customerEmail || "").trim();
+    const customerPhone = String(body.customerPhone || "").trim();
+    const address = String(body.address || "").trim();
     const city = String(body.city || "").trim();
+    const state = String(body.state || "").trim();
+    const pincode = String(body.pincode || "").trim();
 
-    const state = String(
-      body.state || ""
-    ).trim();
-
-    const pincode = String(
-      body.pincode || ""
-    ).trim();
-
-    const items = Array.isArray(body.items)
-      ? body.items
-      : [];
+    if (!Array.isArray(items) || items.length === 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Your cart is empty.",
+        },
+        { status: 400 }
+      );
+    }
 
     if (
       !customerName ||
@@ -61,18 +43,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          message:
-            "Customer and delivery details are required.",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (!items.length) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Your cart is empty.",
+          message: "Please fill all delivery details.",
         },
         { status: 400 }
       );
@@ -82,8 +53,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          message:
-            "Please enter a valid 10-digit mobile number.",
+          message: "Please enter a valid 10-digit phone number.",
         },
         { status: 400 }
       );
@@ -93,34 +63,46 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          message:
-            "Please enter a valid 6-digit pincode.",
+          message: "Please enter a valid 6-digit pincode.",
         },
         { status: 400 }
       );
     }
 
-    /*
-     * If the customer is logged in,
-     * attach the order to their account.
-     *
-     * Guest checkout will continue to work
-     * because userId can remain null.
-     */
+    const keyId = process.env.RAZORPAY_KEY_ID;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+    if (!keyId || !keySecret) {
+      console.error("Razorpay environment variables are missing.");
+
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Payment gateway configuration is missing.",
+        },
+        { status: 500 }
+      );
+    }
+
+    // Get logged-in customer if available.
+    // Guest checkout is also allowed.
     const userId = getCustomerUserId(req);
 
-    /*
-     * Fetch products from database instead of
-     * trusting prices sent from the browser.
-     */
-    const productIds = items
-      .map((item: any) => Number(item.productId))
+    // Clean and validate cart items.
+    const cleanItems = items
+      .map((item) => ({
+        productId: Number(item.productId),
+        quantity: Number(item.quantity),
+      }))
       .filter(
-        (id: number) =>
-          Number.isInteger(id) && id > 0
+        (item) =>
+          Number.isInteger(item.productId) &&
+          item.productId > 0 &&
+          Number.isInteger(item.quantity) &&
+          item.quantity > 0
       );
 
-    if (!productIds.length) {
+    if (cleanItems.length === 0) {
       return NextResponse.json(
         {
           success: false,
@@ -129,6 +111,10 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Fetch actual products from database.
+    // Price is always taken from DB, not from frontend.
+    const productIds = [...new Set(cleanItems.map((item) => item.productId))];
 
     const products = await prisma.product.findMany({
       where: {
@@ -142,64 +128,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          message:
-            "One or more products are no longer available.",
+          message: "One or more products are no longer available.",
         },
         { status: 400 }
       );
     }
 
+    const productMap = new Map(
+      products.map((product) => [product.id, product])
+    );
+
+    // Validate stock and calculate subtotal from DB prices.
     let subtotal = 0;
 
-    const orderItems = [];
-
-    for (const item of items) {
-      const productId = Number(item.productId);
-      const quantity = Number(item.quantity);
-
-      if (
-        !Number.isInteger(productId) ||
-        productId <= 0
-      ) {
-        return NextResponse.json(
-          {
-            success: false,
-            message: "Invalid product in cart.",
-          },
-          { status: 400 }
-        );
-      }
-
-      if (
-        !Number.isInteger(quantity) ||
-        quantity <= 0
-      ) {
-        return NextResponse.json(
-          {
-            success: false,
-            message:
-              "Invalid product quantity.",
-          },
-          { status: 400 }
-        );
-      }
-
-      const product = products.find(
-        (p) => p.id === productId
-      );
+    for (const item of cleanItems) {
+      const product = productMap.get(item.productId);
 
       if (!product) {
         return NextResponse.json(
           {
             success: false,
-            message:
-              "One or more products are no longer available.",
+            message: "Product not found.",
           },
           { status: 400 }
         );
       }
 
-      if (product.stock < quantity) {
+      if (product.stock < item.quantity) {
         return NextResponse.json(
           {
             success: false,
@@ -209,37 +164,83 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const itemTotal =
-        product.price * quantity;
+      subtotal += product.price * item.quantity;
+    }
 
-      subtotal += itemTotal;
+    subtotal = Number(subtotal.toFixed(2));
 
-      orderItems.push({
-        productId: product.id,
-        quantity,
-        price: product.price,
-      });
+    // Keep this same as the checkout page.
+    const deliveryCharge = subtotal >= 999 ? 0 : 49;
+
+    const total = Number((subtotal + deliveryCharge).toFixed(2));
+
+    if (total <= 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid order amount.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Generate our own order number.
+    // This is also used as Razorpay receipt.
+    const orderNumber = `SRV-${Date.now()}-${Math.floor(
+      Math.random() * 10000
+    )}`;
+
+    const amountInPaise = Math.round(total * 100);
+
+    /*
+     * STEP 1:
+     * Create Razorpay order.
+     */
+    const razorpayAuth = Buffer.from(
+      `${keyId}:${keySecret}`
+    ).toString("base64");
+
+    const razorpayResponse = await fetch(
+      "https://api.razorpay.com/v1/orders",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Basic ${razorpayAuth}`,
+        },
+        body: JSON.stringify({
+          amount: amountInPaise,
+          currency: "INR",
+          receipt: orderNumber,
+          notes: {
+            orderNumber,
+            customerName,
+            customerEmail,
+            customerPhone,
+          },
+        }),
+      }
+    );
+
+    const razorpayData = await razorpayResponse.json();
+
+    if (!razorpayResponse.ok) {
+      console.error("Razorpay order creation failed:", razorpayData);
+
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            razorpayData?.error?.description ||
+            "Unable to create Razorpay order.",
+        },
+        { status: 502 }
+      );
     }
 
     /*
-     * Current delivery rule:
-     * Free delivery above ₹999.
-     * Otherwise ₹49.
-     */
-    const deliveryCharge =
-      subtotal >= 999 ? 0 : 49;
-
-    const total =
-      subtotal + deliveryCharge;
-
-    const orderNumber =
-      generateOrderNumber();
-
-    /*
-     * Create database order.
-     *
-     * userId is automatically saved when the
-     * customer is logged in.
+     * STEP 2:
+     * Save order in our PostgreSQL database.
      */
     const order = await prisma.order.create({
       data: {
@@ -258,53 +259,61 @@ export async function POST(req: NextRequest) {
         deliveryCharge,
         total,
 
+        razorpayOrderId: razorpayData.id,
+
         paymentStatus: "PENDING",
         orderStatus: "PENDING",
 
         userId: userId || null,
 
         items: {
-          create: orderItems,
+          create: cleanItems.map((item) => {
+            const product = productMap.get(item.productId)!;
+
+            return {
+              productId: product.id,
+              quantity: item.quantity,
+              price: product.price,
+            };
+          }),
         },
       },
-
       include: {
-        items: {
-          include: {
-            product: true,
-          },
-        },
+        items: true,
       },
     });
 
+    /*
+     * STEP 3:
+     * Send everything required by Razorpay checkout
+     * back to the frontend.
+     */
     return NextResponse.json({
       success: true,
-      message: "Order created successfully.",
-      order: {
-        id: order.id,
-        orderNumber: order.orderNumber,
-        subtotal: order.subtotal,
-        deliveryCharge: order.deliveryCharge,
-        total: order.total,
-        paymentStatus:
-          order.paymentStatus,
-        orderStatus:
-          order.orderStatus,
-        userId: order.userId,
-        items: order.items,
-      },
+
+      keyId,
+
+      amount: amountInPaise,
+      currency: "INR",
+
+      razorpayOrderId: razorpayData.id,
+
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+
+      subtotal,
+      deliveryCharge,
+      total,
+
+      userId: order.userId,
     });
   } catch (error) {
-    console.error(
-      "CREATE ORDER ERROR:",
-      error
-    );
+    console.error("Create order error:", error);
 
     return NextResponse.json(
       {
         success: false,
-        message:
-          "Unable to create order. Please try again.",
+        message: "Something went wrong while creating your order.",
       },
       { status: 500 }
     );
