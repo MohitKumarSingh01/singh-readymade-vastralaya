@@ -3,7 +3,7 @@
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import Header from "@/components/Header";
+import { Header } from "@/components/Header";
 
 function OrderSuccessContent() {
   const searchParams = useSearchParams();
