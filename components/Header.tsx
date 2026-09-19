@@ -48,6 +48,10 @@ export function Header() {
             marginLeft: "auto",
           }}
         >
+          <Link href="/account" className="header-account">
+            Account
+          </Link>
+
           <Link href="/admin" className="header-admin">
             Admin
           </Link>
